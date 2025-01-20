@@ -50,7 +50,12 @@ router.get('/mangadex/:id', async ({ params }) => {
 		return text('Not found');
 	}
 
-	const feedResponse = await fetch(`https://api.mangadex.org/manga/${params.id}/feed`, {
+	const searchParams = new URLSearchParams({
+		'order[volume]': 'desc',
+		'order[chapter]': 'desc',
+	});
+
+	const feedResponse = await fetch(`https://api.mangadex.org/manga/${params.id}/feed?${searchParams}`, {
 		headers: {
 			'user-agent': 'rss-at-the-edge/0.1',
 		},
