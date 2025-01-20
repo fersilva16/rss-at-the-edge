@@ -40,24 +40,30 @@ router.get('/youtube/:channelId', async ({ params }) => {
 });
 
 router.get('/mangadex/:id', async ({ params }) => {
-	const detailsResponse = await fetch(`https://api.mangadex.org/manga/${params.id}`);
+	const detailsResponse = await fetch(`https://api.mangadex.org/manga/${params.id}`, {
+		headers: {
+			'user-agent': 'rss-at-the-edge/0.1',
+		},
+	});
 
 	if (!detailsResponse.ok) {
 		return text('Not found');
 	}
 
-	const feedResponse = await fetch(`https://api.mangadex.org/manga/${params.id}/feed`);
+	const feedResponse = await fetch(`https://api.mangadex.org/manga/${params.id}/feed`, {
+		headers: {
+			'user-agent': 'rss-at-the-edge/0.1',
+		},
+	});
 
 	if (!feedResponse.ok) {
 		return text('Not found');
 	}
 
-	// mangasFetched.push({ ...mangaData, chapters: mangaFeedFilteredByTranslatedLanguage });
-
 	const details = (await detailsResponse.json()) as any;
 	const feed = (await feedResponse.json()) as any;
 
-	const enFeed = feed.filter((chapter: any) => chapter.attributes.translatedLanguage === 'en') as any[];
+	const enFeed = feed.data.filter((chapter: any) => chapter.attributes.translatedLanguage === 'en') as any[];
 
 	const chapters = enFeed.map<ItemOptions>((chapter) => ({
 		title: chapter.attributes.title,
@@ -69,10 +75,10 @@ router.get('/mangadex/:id', async ({ params }) => {
 
 	const rss = new RSS(
 		{
-			site_url: `https://mangadex.org/title/${details.id}`,
-			feed_url: `https://mangadex.org/title/${details.id}`,
-			title: details.attributes.title.en,
-			description: details.attributes.description.en,
+			site_url: `https://mangadex.org/title/${details.data.id}`,
+			feed_url: `https://mangadex.org/title/${details.data.id}`,
+			title: details.data.attributes.title.en,
+			description: details.data.attributes.description.en,
 		},
 		chapters
 	);
