@@ -12,12 +12,14 @@
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.5.2",
 		"@cloudflare/workers-types": "^4.20241230.0",
+		"@types/rss": "^0.0.32",
 		"typescript": "^5.5.2",
 		"vitest": "2.1.8",
 		"wrangler": "^3.60.3"
 	},
 	"dependencies": {
 		"fast-xml-parser": "^4.5.1",
-		"itty-router": "^5.0.18"
+		"itty-router": "^5.0.18",
+		"rss": "^1.2.2"
 	}
 }

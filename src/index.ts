@@ -1,3 +1,4 @@
+import RSS, { ItemOptions } from 'rss';
 import { Router, withParams, text } from 'itty-router';
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 
@@ -32,6 +33,51 @@ router.get('/youtube/:channelId', async ({ params }) => {
 	const output = xmlBuilder.build(newXml);
 
 	return new Response(output, {
+		headers: {
+			'content-type': 'text/xml',
+		},
+	});
+});
+
+router.get('/mangadex/:id', async ({ params }) => {
+	const detailsResponse = await fetch(`https://api.mangadex.org/manga/${params.id}`);
+
+	if (!detailsResponse.ok) {
+		return text('Not found');
+	}
+
+	const feedResponse = await fetch(`https://api.mangadex.org/manga/${params.id}/feed`);
+
+	if (!feedResponse.ok) {
+		return text('Not found');
+	}
+
+	// mangasFetched.push({ ...mangaData, chapters: mangaFeedFilteredByTranslatedLanguage });
+
+	const details = (await detailsResponse.json()) as any;
+	const feed = (await feedResponse.json()) as any;
+
+	const enFeed = feed.filter((chapter: any) => chapter.attributes.translatedLanguage === 'en') as any[];
+
+	const chapters = enFeed.map<ItemOptions>((chapter) => ({
+		title: chapter.attributes.title,
+		date: chapter.attributes.readableAt,
+		url: `https://mangadex.org/chapter/${chapter.id}`,
+		description: `Vol. ${chapter.attributes.volume}, Ch. ${chapter.attributes.chapter}`,
+		categories: [],
+	}));
+
+	const rss = new RSS(
+		{
+			site_url: `https://mangadex.org/title/${details.id}`,
+			feed_url: `https://mangadex.org/title/${details.id}`,
+			title: details.attributes.title.en,
+			description: details.attributes.description.en,
+		},
+		chapters
+	);
+
+	return new Response(rss.xml(), {
 		headers: {
 			'content-type': 'text/xml',
 		},
