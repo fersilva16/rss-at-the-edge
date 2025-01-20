@@ -70,11 +70,19 @@ router.get('/mangadex/:id', async ({ params }) => {
 
 	const enFeed = feed.data.filter((chapter: any) => chapter.attributes.translatedLanguage === 'en') as any[];
 
+	const getDescription = (chapter: any) => {
+		if (!chapter.attributes.volume) {
+			return `Ch. ${chapter.attributes.chapter}`;
+		}
+
+		return `Vol. ${chapter.attributes.volume}, Ch. ${chapter.attributes.chapter}`;
+	};
+
 	const chapters = enFeed.map<ItemOptions>((chapter) => ({
 		title: chapter.attributes.title,
 		date: chapter.attributes.readableAt,
 		url: `https://mangadex.org/chapter/${chapter.id}`,
-		description: `Vol. ${chapter.attributes.volume}, Ch. ${chapter.attributes.chapter}`,
+		description: getDescription(chapter),
 		categories: [],
 	}));
 
