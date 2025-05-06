@@ -1,149 +1,114 @@
 import RSS, { ItemOptions } from 'rss';
-import { Router, withParams, text } from 'itty-router';
+import { Hono } from 'hono';
+import { cache } from 'hono/cache';
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 
 const xmlParser = new XMLParser({ ignoreAttributes: false });
 const xmlBuilder = new XMLBuilder({ ignoreAttributes: false });
 
-const CACHE_TTL = {
-	youtube: 3600, // 1 hour
-	mangadex: 7200, // 2 hours
-};
+const app = new Hono();
 
-async function withCache<T>(request: Request, ttl: number, handler: () => Promise<Response>): Promise<Response> {
-	const cache = caches.default;
-	const cached = await cache.match(request.url);
+const youtubeCache = cache({ cacheName: 'youtube', cacheControl: 'max-age=3600' });
+const mangadexCache = cache({ cacheName: 'mangadex', cacheControl: 'max-age=3600' });
 
-	if (cached) {
-		return cached;
+app.get('/youtube/:channelId', youtubeCache, async (c) => {
+	const { channelId } = c.req.param();
+
+	const response = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`);
+
+	if (!response.ok) {
+		return new Response('Not found', { status: 404 });
 	}
 
-	const response = await handler();
+	const result = await response.text();
 
-	const responseWithCache = new Response(response.body, {
-		headers: {
-			...Object.fromEntries(response.headers.entries()),
-			'Cache-Control': `public, max-age=${ttl}`,
+	const xml = xmlParser.parse(result);
+
+	const newXml = {
+		...xml,
+		feed: {
+			...xml.feed,
+			entry: xml.feed.entry.filter(
+				(entry: any) => !entry['media:group']['media:description'].includes('#shorts') && !entry.title.includes('#shorts')
+			),
 		},
-		status: response.status,
-		statusText: response.statusText,
-	});
+	};
 
-	await cache.put(request, responseWithCache.clone());
+	const output = xmlBuilder.build(newXml);
 
-	return responseWithCache;
-}
-
-const router = Router({
-	before: [withParams],
-});
-
-router.get('/youtube/:channelId', async (request) => {
-	const { params } = request;
-
-	return withCache(request, CACHE_TTL.youtube, async () => {
-		const response = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${params.channelId}`);
-
-		if (!response.ok) {
-			return text('Not found');
-		}
-
-		const result = await response.text();
-
-		const xml = xmlParser.parse(result);
-
-		const newXml = {
-			...xml,
-			feed: {
-				...xml.feed,
-				entry: xml.feed.entry.filter(
-					(entry: any) => !entry['media:group']['media:description'].includes('#shorts') && !entry.title.includes('#shorts')
-				),
-			},
-		};
-
-		const output = xmlBuilder.build(newXml);
-
-		return new Response(output, {
-			headers: {
-				'content-type': 'text/xml',
-			},
-		});
+	return new Response(output, {
+		headers: {
+			'content-type': 'text/xml',
+		},
 	});
 });
 
-router.get('/mangadex/:id', async (request) => {
-	const { params } = request;
+app.get('/mangadex/:id', mangadexCache, async (c) => {
+	const { id } = c.req.param();
 
-	return withCache(request, CACHE_TTL.mangadex, async () => {
-		const detailsResponse = await fetch(`https://api.mangadex.org/manga/${params.id}`, {
-			headers: {
-				'user-agent': 'rss-at-the-edge/0.1',
-			},
-		});
+	const detailsResponse = await fetch(`https://api.mangadex.org/manga/${id}`, {
+		headers: {
+			'user-agent': 'rss-at-the-edge/0.1',
+		},
+	});
 
-		if (!detailsResponse.ok) {
-			return text('Not found');
+	if (!detailsResponse.ok) {
+		return new Response('Not found', { status: 404 });
+	}
+
+	const searchParams = new URLSearchParams({
+		'order[volume]': 'desc',
+		'order[chapter]': 'desc',
+	});
+
+	const feedResponse = await fetch(`https://api.mangadex.org/manga/${id}/feed?${searchParams}`, {
+		headers: {
+			'user-agent': 'rss-at-the-edge/0.1',
+		},
+	});
+
+	if (!feedResponse.ok) {
+		return new Response('Not found', { status: 404 });
+	}
+
+	const details = (await detailsResponse.json()) as any;
+	const feed = (await feedResponse.json()) as any;
+
+	const enFeed = feed.data.filter((chapter: any) => chapter.attributes.translatedLanguage === 'en') as any[];
+
+	const getDescription = (chapter: any) => {
+		if (!chapter.attributes.volume) {
+			return `Ch. ${chapter.attributes.chapter}`;
 		}
 
-		const searchParams = new URLSearchParams({
-			'order[volume]': 'desc',
-			'order[chapter]': 'desc',
-		});
+		return `Vol. ${chapter.attributes.volume}, Ch. ${chapter.attributes.chapter}`;
+	};
 
-		const feedResponse = await fetch(`https://api.mangadex.org/manga/${params.id}/feed?${searchParams}`, {
-			headers: {
-				'user-agent': 'rss-at-the-edge/0.1',
-			},
-		});
+	const chapters = enFeed.map<ItemOptions>((chapter) => ({
+		title: chapter.attributes.title,
+		date: chapter.attributes.readableAt,
+		url: `https://mangadex.org/chapter/${chapter.id}`,
+		description: getDescription(chapter),
+		categories: [],
+	}));
 
-		if (!feedResponse.ok) {
-			return text('Not found');
-		}
+	const rss = new RSS(
+		{
+			site_url: `https://mangadex.org/title/${details.data.id}`,
+			feed_url: `https://mangadex.org/title/${details.data.id}`,
+			title: details.data.attributes.title.en,
+			description: details.data.attributes.description.en,
+		},
+		chapters
+	);
 
-		const details = (await detailsResponse.json()) as any;
-		const feed = (await feedResponse.json()) as any;
-
-		const enFeed = feed.data.filter((chapter: any) => chapter.attributes.translatedLanguage === 'en') as any[];
-
-		const getDescription = (chapter: any) => {
-			if (!chapter.attributes.volume) {
-				return `Ch. ${chapter.attributes.chapter}`;
-			}
-
-			return `Vol. ${chapter.attributes.volume}, Ch. ${chapter.attributes.chapter}`;
-		};
-
-		const chapters = enFeed.map<ItemOptions>((chapter) => ({
-			title: chapter.attributes.title,
-			date: chapter.attributes.readableAt,
-			url: `https://mangadex.org/chapter/${chapter.id}`,
-			description: getDescription(chapter),
-			categories: [],
-		}));
-
-		const rss = new RSS(
-			{
-				site_url: `https://mangadex.org/title/${details.data.id}`,
-				feed_url: `https://mangadex.org/title/${details.data.id}`,
-				title: details.data.attributes.title.en,
-				description: details.data.attributes.description.en,
-			},
-			chapters
-		);
-
-		return new Response(rss.xml(), {
-			headers: {
-				'content-type': 'text/xml',
-			},
-		});
+	return new Response(rss.xml(), {
+		headers: {
+			'content-type': 'text/xml',
+		},
 	});
 });
 
-router.all('*', () => new Response('Not found', { status: 404 }));
+app.notFound((c) => new Response('Not found', { status: 404 }));
 
-export default {
-	async fetch(request): Promise<Response> {
-		return await router.fetch(request);
-	},
-} satisfies ExportedHandler<Env>;
+export default app;
