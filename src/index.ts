@@ -2,12 +2,16 @@ import RSS, { ItemOptions } from 'rss';
 import { Hono } from 'hono';
 import { cache } from 'hono/cache';
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
+import { google } from 'googleapis';
+import { parse, toSeconds } from 'iso8601-duration';
+import { batch } from './batch';
 
 const xmlParser = new XMLParser({ ignoreAttributes: false });
 const xmlBuilder = new XMLBuilder({ ignoreAttributes: false });
 
 type Bindings = {
 	kv: KVNamespace;
+	YOUTUBE_API_KEY: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -20,6 +24,14 @@ app.use(
 	})
 );
 
+const extractVideoId = (url: string): string | null => {
+	return new URL(url).searchParams.get('v');
+};
+
+const getCacheKey = (videoId: string): string => {
+	return `youtube-${videoId}`;
+};
+
 const MAX_DURATION = 180;
 
 app.get('/youtube/:channelId', async ({ req, env }) => {
@@ -31,16 +43,24 @@ app.get('/youtube/:channelId', async ({ req, env }) => {
 		return new Response('Not found', { status: 404 });
 	}
 
+	const youtube = google.youtube({ version: 'v3', auth: env.YOUTUBE_API_KEY });
+
 	const result = await response.text();
 	const xml = xmlParser.parse(result);
 
 	const durationMap = new Map<string, number>();
+	let idsToFetch: string[] = [];
 
 	await Promise.all(
 		xml.feed.entry.map(async (entry: any) => {
 			const url = entry.link['@_href'];
+			const videoId = extractVideoId(url);
 
-			const cacheKey = `youtube-${url}`;
+			if (!videoId) {
+				return;
+			}
+
+			const cacheKey = getCacheKey(videoId);
 			const cached = await env.kv.get(cacheKey);
 
 			if (cached) {
@@ -49,25 +69,48 @@ app.get('/youtube/:channelId', async ({ req, env }) => {
 				return;
 			}
 
-			const videoResponse = await fetch(url);
-
-			if (videoResponse.ok) {
-				const html = await videoResponse.text();
-				const durationMatch = html.match(/"lengthSeconds":"(\d+)"/);
-
-				if (durationMatch?.[1]) {
-					const durationSeconds = durationMatch[1];
-					const seconds = parseInt(durationSeconds, 10);
-
-					await env.kv.put(cacheKey, durationSeconds, {
-						expirationTtl: 2592000, // 30 days
-					});
-
-					durationMap.set(url, seconds);
-				}
-			}
+			idsToFetch.push(videoId);
 		})
 	);
+
+	let pageToken: string | undefined;
+
+	do {
+		const { data } = await youtube.videos.list({
+			part: ['contentDetails'],
+			id: idsToFetch,
+			maxResults: 50,
+			pageToken,
+		});
+
+		if (!data.items) {
+			break;
+		}
+
+		console.log(data);
+
+		await Promise.all(
+			data.items.map(async (item) => {
+				if (!item.contentDetails?.duration || !item.id) {
+					return;
+				}
+
+				const duration = toSeconds(parse(item.contentDetails.duration));
+
+				durationMap.set(item.id, duration);
+
+				const cacheKey = getCacheKey(item.id);
+
+				await env.kv.put(cacheKey, duration.toString(), {
+					expirationTtl: 2592000, // 30 days
+				});
+			})
+		);
+
+		if (data.nextPageToken) {
+			pageToken = data.nextPageToken;
+		}
+	} while (pageToken);
 
 	const filteredEntries = xml.feed.entry.filter((entry: any) => {
 		const url = entry.link['@_href'];

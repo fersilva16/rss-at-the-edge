@@ -9,3 +9,6 @@ node_modules/
 
 # Wrangler
 .wrangler
+
+# Environment variables
+.dev.vars

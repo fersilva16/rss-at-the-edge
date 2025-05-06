@@ -11,7 +11,9 @@
 	},
 	"dependencies": {
 		"fast-xml-parser": "^5.2.2",
+		"googleapis": "^148.0.0",
 		"hono": "^4.7.8",
+		"iso8601-duration": "^2.1.2",
 		"rss": "^1.2.2"
 	},
 	"devDependencies": {
