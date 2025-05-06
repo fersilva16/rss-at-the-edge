@@ -11,11 +11,9 @@ const CACHE_TTL = {
 };
 
 async function withCache<T>(request: Request, ttl: number, handler: () => Promise<Response>): Promise<Response> {
-	const cacheUrl = new URL(request.url);
-	const cacheKey = new Request(cacheUrl.toString(), request);
 	const cache = caches.default;
+	const cached = await cache.match(request.url);
 
-	const cached = await cache.match(cacheKey);
 	if (cached) {
 		return cached;
 	}
@@ -31,7 +29,7 @@ async function withCache<T>(request: Request, ttl: number, handler: () => Promis
 		statusText: response.statusText,
 	});
 
-	await cache.put(cacheKey, responseWithCache.clone());
+	await cache.put(request, responseWithCache.clone());
 
 	return responseWithCache;
 }
@@ -40,7 +38,9 @@ const router = Router({
 	before: [withParams],
 });
 
-router.get('/youtube/:channelId', async ({ params, request }) => {
+router.get('/youtube/:channelId', async (request) => {
+	const { params } = request;
+
 	return withCache(request, CACHE_TTL.youtube, async () => {
 		const response = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${params.channelId}`);
 
@@ -72,7 +72,9 @@ router.get('/youtube/:channelId', async ({ params, request }) => {
 	});
 });
 
-router.get('/mangadex/:id', async ({ params, request }) => {
+router.get('/mangadex/:id', async (request) => {
+	const { params } = request;
+
 	return withCache(request, CACHE_TTL.mangadex, async () => {
 		const detailsResponse = await fetch(`https://api.mangadex.org/manga/${params.id}`, {
 			headers: {
