@@ -11,13 +11,13 @@ type Bindings = {
 
 const app = new Hono<{ Bindings: Bindings }>();
 
-// app.use(
-// 	'*',
-// 	cache({
-// 		cacheName: 'rss-at-the-edge',
-// 		cacheControl: 'max-age=86400', // 1 day
-// 	})
-// );
+app.use(
+	'*',
+	cache({
+		cacheName: 'rss-at-the-edge',
+		cacheControl: 'max-age=86400', // 1 day
+	})
+);
 
 app.get('/youtube/:channelId', youtubeGet);
 
