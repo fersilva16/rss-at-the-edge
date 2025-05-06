@@ -10,3 +10,6 @@ compatibility_flags = ["nodejs_compat"]
 [observability]
 enabled = true
 
+[[kv_namespaces]]
+binding = "kv"
+id = "7effdad1c659478d89b7050a93247cb1"

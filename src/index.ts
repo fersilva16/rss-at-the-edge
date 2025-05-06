@@ -6,13 +6,24 @@ import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 const xmlParser = new XMLParser({ ignoreAttributes: false });
 const xmlBuilder = new XMLBuilder({ ignoreAttributes: false });
 
-const app = new Hono();
+type Bindings = {
+	kv: KVNamespace;
+};
 
-const youtubeCache = cache({ cacheName: 'youtube', cacheControl: 'max-age=3600' });
-const mangadexCache = cache({ cacheName: 'mangadex', cacheControl: 'max-age=3600' });
+const app = new Hono<{ Bindings: Bindings }>();
 
-app.get('/youtube/:channelId', youtubeCache, async (c) => {
-	const { channelId } = c.req.param();
+app.use(
+	'*',
+	cache({
+		cacheName: 'rss-at-the-edge',
+		cacheControl: 'max-age=86400', // 1 day
+	})
+);
+
+const MAX_DURATION = 180;
+
+app.get('/youtube/:channelId', async ({ req, env }) => {
+	const { channelId } = req.param();
 
 	const response = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`);
 
@@ -21,16 +32,64 @@ app.get('/youtube/:channelId', youtubeCache, async (c) => {
 	}
 
 	const result = await response.text();
-
 	const xml = xmlParser.parse(result);
+
+	const durationMap = new Map<string, number>();
+
+	await Promise.all(
+		xml.feed.entry.map(async (entry: any) => {
+			const url = entry.link['@_href'];
+
+			const cacheKey = `youtube-${url}`;
+			const cached = await env.kv.get(cacheKey);
+
+			if (cached) {
+				durationMap.set(url, parseInt(cached, 10));
+
+				return;
+			}
+
+			const videoResponse = await fetch(url);
+
+			if (videoResponse.ok) {
+				const html = await videoResponse.text();
+				const durationMatch = html.match(/"lengthSeconds":"(\d+)"/);
+
+				if (durationMatch?.[1]) {
+					const durationSeconds = durationMatch[1];
+					const seconds = parseInt(durationSeconds, 10);
+
+					await env.kv.put(cacheKey, durationSeconds, {
+						expirationTtl: 2592000, // 30 days
+					});
+
+					durationMap.set(url, seconds);
+				}
+			}
+		})
+	);
+
+	const filteredEntries = xml.feed.entry.filter((entry: any) => {
+		const url = entry.link['@_href'];
+
+		const duration = durationMap.get(url);
+
+		if (!duration) {
+			return true;
+		}
+
+		if (duration >= MAX_DURATION) {
+			return true;
+		}
+
+		return false;
+	});
 
 	const newXml = {
 		...xml,
 		feed: {
 			...xml.feed,
-			entry: xml.feed.entry.filter(
-				(entry: any) => !entry['media:group']['media:description'].includes('#shorts') && !entry.title.includes('#shorts')
-			),
+			entry: filteredEntries,
 		},
 	};
 
@@ -43,7 +102,7 @@ app.get('/youtube/:channelId', youtubeCache, async (c) => {
 	});
 });
 
-app.get('/mangadex/:id', mangadexCache, async (c) => {
+app.get('/mangadex/:id', async (c) => {
 	const { id } = c.req.param();
 
 	const detailsResponse = await fetch(`https://api.mangadex.org/manga/${id}`, {
