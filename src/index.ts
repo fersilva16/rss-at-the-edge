@@ -3,6 +3,7 @@ import { cache } from 'hono/cache';
 
 import { youtubeGet } from './youtubeGet';
 import { mangadexGet } from './mangadexGet';
+import { indexGet } from './indexGet';
 
 type Bindings = {
 	kv: KVNamespace;
@@ -22,6 +23,8 @@ app.use(
 app.get('/youtube/:channelId', youtubeGet);
 
 app.get('/mangadex/:id', mangadexGet);
+
+app.get('/', indexGet);
 
 app.notFound((c) => new Response('Not found', { status: 404 }));
 
