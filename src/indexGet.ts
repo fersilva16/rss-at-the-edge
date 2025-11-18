@@ -46,6 +46,15 @@ export const indexGet = async ({ req }: Context) => {
 
 		const rssLink = $('link[type="application/rss+xml"], link[type="application/atom+xml"]').first().attr('href');
 
+		const parsedUrl = new URL(url);
+		const currentUrl = new URL(req.url);
+
+		const isYoutube = parsedUrl.hostname.includes('youtube.com');
+
+		if (isYoutube) {
+			return Response.redirect(`${currentUrl.origin}/youtube/${parsedUrl.searchParams.get('channel_id')}`, 302);
+		}
+
 		return new Response(rssLink || '', {
 			headers: {
 				'content-type': 'text/plain',
