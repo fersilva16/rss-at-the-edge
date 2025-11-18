@@ -46,16 +46,26 @@ export const indexGet = async ({ req }: Context) => {
 
 		const rssLink = $('link[type="application/rss+xml"], link[type="application/atom+xml"]').first().attr('href');
 
-		const parsedUrl = new URL(url);
-		const currentUrl = new URL(req.url);
-
-		const isYoutube = parsedUrl.hostname.includes('youtube.com');
-
-		if (isYoutube) {
-			return Response.redirect(`${currentUrl.origin}/youtube/${parsedUrl.searchParams.get('channel_id')}`, 302);
+		if (!rssLink) {
+			return new Response('No RSS link found', {
+				status: 400,
+				headers: {
+					'content-type': 'text/plain',
+				},
+			});
 		}
 
-		return new Response(rssLink || '', {
+		const rssUrl = new URL(rssLink);
+		const currentUrl = new URL(req.url);
+
+		const isYoutube = rssUrl.hostname.includes('youtube.com') || rssUrl.hostname.includes('youtu.be');
+		const youtubeChannelId = rssUrl.searchParams.get('channel_id');
+
+		if (isYoutube && youtubeChannelId) {
+			return Response.redirect(`${currentUrl.origin}/youtube/${youtubeChannelId}`, 302);
+		}
+
+		return new Response(rssLink, {
 			headers: {
 				'content-type': 'text/plain',
 			},
